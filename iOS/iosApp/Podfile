@@ -1,0 +1,12 @@
+target 'datalayer_sample_ios' do
+  # Comment the next line if you don't want to use dynamic frameworks
+  use_frameworks! :linkage => :static
+
+  platform :ios, '13.5'
+
+  # Pods for datalayer_sample_ios
+  pod 'datalayer', :path => '../pod_datalayer'
+  pod 'pod_testolibwrapper', :path => '../pod_testolibwrapper/'
+  pod 'pod_testolib', :path => '../pod_testolib'
+
+end
