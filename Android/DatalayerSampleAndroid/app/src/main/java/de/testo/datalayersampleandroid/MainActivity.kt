@@ -40,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     private val formatter = "HH:mm:ss:S"
 
     private var probeFactory: ProbeFactory? = null
+    private val probes: MutableMap<String, Probe> = mutableMapOf()
 
     @ExperimentalCoroutinesApi
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,9 +55,9 @@ class MainActivity : AppCompatActivity() {
         buttonAvailable = findViewById(R.id.buttonavailable)
         probeFactory = ProbeFactory(application)
 
-        requestPermissionsForBluefalcon(this)
+        requestPermissionsForBluetooth(this)
 
-        probeFactory?.startScan()
+        probeFactory?.startBtScan()
 
         buttonDiscover?.setOnClickListener {
             onDiscoverClicked()
@@ -83,7 +84,7 @@ class MainActivity : AppCompatActivity() {
         when (requestCode) {
             PERMISSION_REQUEST_CODE -> {
                 if ((grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)) {
-                    probeFactory?.startScan()
+                    probeFactory?.startBtScan()
                 }
                 return
             }
@@ -120,17 +121,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onDiscoverClicked() {
-        printString("Discovered devices:${probeFactory?.connectableDevices?.map { "${it.uuid} " }}")
+        printString("Discovered devices:${probeFactory?.getConnectableDevices()?.map { "${it.serialNo} ${it.probeType} " }}")
     }
 
     @ExperimentalCoroutinesApi
     private fun onConnectClicked() {
-        val devices = probeFactory?.connectableDevices
+        val devices = probeFactory?.getConnectableDevices()
         if (devices != null) {
-            printString("Connection to devices:${devices.map { "${it.uuid} " }}")
-            thread(start = true) {
-                for (device in devices) {
-                    val probe = probeFactory!!.create(device) ?: continue
+            printString("Connection to devices:${devices.map { "${it.serialNo} ${it.probeType} " }}")
+            for (device in devices) {
+                thread(start = true) {
+                    val probe = probeFactory!!.create(device)
+                    probes[device.serialNo] = probe
                     when (device.probeType) {
                         ProbeType.T104_IR_BT -> {
                             val notifyMeasValueFunc: NotifyFunction = {
@@ -138,7 +140,7 @@ class MainActivity : AppCompatActivity() {
                                     printString(
                                         generateNotifyString(
                                             ProbeType.T104_IR_BT.value,
-                                            device.uuid,
+                                            device.serialNo + "," + device.probeType,
                                             it.measType?.name ?: "",
                                             it.physicalUnit?.length ?: 1,
                                             it.probeValue?.value!!
@@ -157,7 +159,7 @@ class MainActivity : AppCompatActivity() {
                             printString(
                                 generateCreateString(
                                     ProbeType.T104_IR_BT.value,
-                                    device.uuid,
+                                    device.serialNo + "," + device.probeType,
                                     probe.getBatteryLevel()
                                 )
                             )
@@ -169,7 +171,7 @@ class MainActivity : AppCompatActivity() {
                                     printString(
                                         generateNotifyString(
                                             ProbeType.MF_HANDLE.value,
-                                            device.uuid,
+                                            device.serialNo + "," + device.probeType,
                                             it.measType?.name ?: "",
                                             it.physicalUnit?.length ?: 1,
                                             it.probeValue?.value!!
@@ -183,7 +185,7 @@ class MainActivity : AppCompatActivity() {
                             printString(
                                 generateCreateString(
                                     ProbeType.MF_HANDLE.value,
-                                    device.uuid,
+                                    device.serialNo + "," + device.probeType,
                                     probe.getBatteryLevel()
                                 )
                             )
@@ -195,7 +197,7 @@ class MainActivity : AppCompatActivity() {
                                     printString(
                                         generateNotifyString(
                                             ProbeType.QSR_HANDLE.value,
-                                            device.uuid,
+                                            device.serialNo + "," + device.probeType,
                                             it.measType?.name ?: "",
                                             it.physicalUnit?.length ?: 1,
                                             it.probeValue?.value!!
@@ -209,7 +211,7 @@ class MainActivity : AppCompatActivity() {
                             printString(
                                 generateCreateString(
                                     ProbeType.QSR_HANDLE.value,
-                                    device.uuid,
+                                    device.serialNo + "," + device.probeType,
                                     probe.getBatteryLevel()
                                 )
                             )
@@ -227,15 +229,18 @@ class MainActivity : AppCompatActivity() {
         if (probeFactory != null) {
             val devicesDisconnect: MutableList<String> = emptyList<String>().toMutableList()
             thread(start = true) {
-                for (device in probeFactory!!.probes.keys.toMutableList()) {
-                    probeFactory?.disconnect(device)
-                    devicesDisconnect += device
+                for (device in probes) {
+                    devicesDisconnect += device.value.getDeviceId()
+                    device.value.disconnect()
                 }
-                printString(
-                    "Devices ${
-                        devicesDisconnect.toString().removeSurrounding("[", "]")
-                    } disconnected!"
-                )
+                probes.clear()
+                if(devicesDisconnect.isNotEmpty()){
+                    printString(
+                        "Devices ${
+                            devicesDisconnect.toString().removeSurrounding("[", "]")
+                        } disconnected!"
+                    )
+                }
             }
         }
     }
@@ -243,7 +248,7 @@ class MainActivity : AppCompatActivity() {
     private fun onBatteryClicked() {
         if (probeFactory != null) {
             thread(start = true) {
-                for (device in probeFactory!!.probes) {
+                for (device in probes) {
                     printString("<device ${device.value.getDeviceId()} ${device.key} battery: ${device.value.getBatteryLevel()}>")
                 }
             }
@@ -252,19 +257,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun onDeviceAvailableClicked() {
         if (probeFactory != null) {
-            for (device in probeFactory!!.probes) {
+            for (device in probes) {
                 printString(
                     "<device ${device.value.getDeviceId()} ${device.key} available ${
-                        probeFactory!!.isDeviceAvailable(
-                            device.key
-                        )
+                        device.value.isDeviceAvailable()
                     }>"
                 )
             }
         }
     }
 
-    private fun requestPermissionsForBluefalcon(
+    private fun requestPermissionsForBluetooth(
         requestingActivity: Activity?
     ) {
         if (requestingActivity != null) {
